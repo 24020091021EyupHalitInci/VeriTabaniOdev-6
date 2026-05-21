@@ -1,98 +1,189 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useEffect } from 'react';
+import {
+  View, Text, TextInput, TouchableOpacity, FlatList,
+  StyleSheet, KeyboardAvoidingView, Platform, Alert
+} from 'react-native';
+import * as SQLite from 'expo-sqlite';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+export default function App() {
+  const [db, setDb] = useState(null);
+  const [message, setMessage] = useState('');
+  const [messageList, setMessageList] = useState([]);
+  const [editingId, setEditingId] = useState(null);
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+  useEffect(() => {
+    // Veritabanını başlat ve tabloyu kur
+    async function setupDatabase() {
+      const database = await SQLite.openDatabaseAsync('DailyNotes.db');
+      setDb(database);
+      
+      await database.execAsync(`
+        CREATE TABLE IF NOT EXISTS Messages (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT);
+      `);
+      
+      fetchMessages(database);
+    }
+    setupDatabase();
+  }, []);
+
+  // Verileri Okuma (Read)
+  const fetchMessages = async (database = db) => {
+    if (!database) return;
+    const allRows = await database.getAllAsync('SELECT * FROM Messages ORDER BY id DESC');
+    setMessageList(allRows);
+  };
+
+  // Veri Ekleme ve Güncelleme (Create / Update)
+  const handleSave = async () => {
+    if (!message.trim()) {
+      Alert.alert('Uyarı', 'Lütfen bir not girin.');
+      return;
+    }
+
+    if (editingId) {
+      await db.runAsync('UPDATE Messages SET content = ? WHERE id = ?', message, editingId);
+      setEditingId(null);
+    } else {
+      await db.runAsync('INSERT INTO Messages (content) VALUES (?)', message);
+    }
+    
+    setMessage('');
+    fetchMessages();
+  };
+
+  // Veri Silme (Delete)
+  const handleDelete = async (id) => {
+    await db.runAsync('DELETE FROM Messages WHERE id = ?', id);
+    fetchMessages();
+  };
+
+  const handleEdit = (item) => {
+    setEditingId(item.id);
+    setMessage(item.content);
+  };
+
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <Text style={styles.cardText}>{item.content}</Text>
+      <View style={styles.actionButtons}>
+        <TouchableOpacity onPress={() => handleEdit(item)} style={styles.editBtn}>
+          <Text style={styles.btnText}>Düzenle</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
+          <Text style={styles.btnText}>Sil</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
-}
 
-export default function HomeScreen() {
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <Text style={styles.header}>Günün Notu</Text>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Mesajınızı buraya yazın..."
+          placeholderTextColor="#888"
+          value={message}
+          onChangeText={setMessage}
+        />
+        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+          <Text style={styles.saveBtnText}>{editingId ? 'Güncelle' : 'Ekle'}</Text>
+        </TouchableOpacity>
+      </View>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      <FlatList
+        data={messageList}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContainer}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    backgroundColor: '#121212',
+    paddingTop: 60,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
+  header: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
     textAlign: 'center',
+    marginBottom: 25,
   },
-  code: {
-    textTransform: 'uppercase',
+  inputContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 20,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  input: {
+    flex: 1,
+    backgroundColor: '#1E1E1E',
+    color: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    height: 50,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  saveBtn: {
+    backgroundColor: '#BB86FC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 20,
+  },
+  saveBtnText: {
+    color: '#121212',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  listContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  card: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cardText: {
+    color: '#E0E0E0',
+    fontSize: 16,
+    marginBottom: 15,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  editBtn: {
+    backgroundColor: '#03DAC6',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 6,
+  },
+  deleteBtn: {
+    backgroundColor: '#CF6679',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 6,
+  },
+  btnText: {
+    color: '#121212',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
